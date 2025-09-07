@@ -17,10 +17,6 @@
     {
       "src": "/playlist-content",
       "dest": "/api/index.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/"
     }
   ]
 }
