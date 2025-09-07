@@ -1,0 +1,21 @@
+{
+  "name": "player1",
+  "version": "1.0.0",
+  "description": "A music player that searches and plays songs from YouTube using Invidious API.",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "keywords": [
+    "music",
+    "player",
+    "youtube",
+    "invidious"
+  ],
+  "author": "Gemini CLI",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0"
+  }
+}
