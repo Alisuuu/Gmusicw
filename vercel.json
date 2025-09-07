@@ -17,6 +17,26 @@
     {
       "src": "/playlist-content",
       "dest": "/api/index.js"
+    },
+    {
+      "src": "/index.html",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/manifest.json",
+      "dest": "/manifest.json"
+    },
+    {
+      "src": "/p2.png",
+      "dest": "/p2.png"
+    },
+    {
+      "src": "/sw.js",
+      "dest": "/sw.js"
+    },
+    {
+      "src": "/",
+      "dest": "/index.html"
     }
   ]
 }
