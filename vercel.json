@@ -7,16 +7,16 @@
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api"
-    },
-    {
       "src": "/search",
-      "dest": "/api"
+      "dest": "/api/index.js"
     },
     {
       "src": "/play",
-      "dest": "/api"
+      "dest": "/api/index.js"
+    },
+    {
+      "src": "/playlist-content",
+      "dest": "/api/index.js"
     },
     {
       "src": "/(.*)",
