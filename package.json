@@ -1,21 +1,12 @@
 {
-  "name": "player1",
+  "name": "player1-vercel",
   "version": "1.0.0",
-  "description": "A music player that searches and plays songs from YouTube using Invidious API.",
-  "main": "api/index.js",
+  "description": "A YouTube background player with Vercel deployment setup.",
+  "main": "api/audio.js",
   "scripts": {
-    "start": "node api/index.js"
+    "start": "vercel dev"
   },
-  "keywords": [
-    "music",
-    "player",
-    "youtube",
-    "invidious"
-  ],
-  "author": "Gemini CLI",
-  "license": "MIT",
-  "dependencies": {
-    "express": "^4.19.2",
-    "node-fetch": "^2.7.0"
-  }
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
