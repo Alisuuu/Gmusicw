@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Player Invidious Playlist</title>
+    <title>YouTube Background Player</title>
     <link rel="manifest" href="manifest.json">
     <script src="https://cdn.polyfill.io/v3/polyfill.min.js?features=default,fetch,Promise"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -72,8 +72,11 @@
             to { opacity: 0.6; transform: scaleY(5); } /* Changed from 1 to 0.6 */
         }
 
-        #audio-player-element {
-            display: none; /* Hidden, controlled by JS */
+        #video-player {
+            width: 75%;
+            height: 100%;
+            display: none;
+            z-index: 2;
         }
 
         #playlist-sidebar {
@@ -200,7 +203,7 @@
                 flex-direction: column;
             }
 
-            #audio-player-element {
+            #video-player {
                 width: 100%;
                 height: 50%;
             }
@@ -282,16 +285,14 @@
             border-radius: 5px;
         }
     </style>
+    <script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body class="bg-gray-900 text-gray-200">
     <div id="player-container">
         <div id="background-overlay"></div>
-        <audio id="audio-player-element" controls></audio>
+        <div id="video-player"></div>
 
-        <div id="playlist-sidebar">
-            <h2 class="text-xl font-bold text-white mb-4">Playlist</h2>
-            <div id="playlistContainer" class="p-4"></div>
-        </div>
+        <div id="playlist-sidebar" class="hidden"></div>
 
         <!-- Visualizer Container -->
         <div id="visualizer-container">
@@ -309,7 +310,7 @@
 
         <div id="initial-play-button" class="absolute inset-0 flex items-center justify-center z-10">
             <button class="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-md">
-                <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" fill="currentColor" class="bi bi-play-fill" viewBox="0 0 16 16">
+                <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" fill="currentColor" class="bi bi-play-fill text-white" viewBox="0 0 16 16">
                     <path d="m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393z"/>
                 </svg>
             </button>
@@ -368,230 +369,139 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // --- Configuration ---
-            const PLAYLIST_ID = 'PLM2V-zC1RStdE8dOpKnw25qUsSXz-YtTo'; // REPLACE WITH YOUR INVIDIOUS PLAYLIST ID
+        const YOUTUBE_API_KEY = 'AIzaSyAv0q4vZqw72Xt9dhQQBWALDT4aasixuKA';
+        const YOUTUBE_API_PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems';
+        const YOUTUBE_API_VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos';
+        const PLAYLIST_ID = 'PLM2V-zC1RStdE8dOpKnw25qUsSXz-YtTo'; // This will be a YouTube playlist ID, as Invidious uses YouTube IDs
+        
+        let player; // This will no longer be a YT.Player object, but a reference to the iframe
+        let playlistItems = [];
+        let originalPlaylist = [];
+        let currentVideoIndex = 0;
+        let isPlayerReady = false;
+        let isShuffle = false;
+        let progressInterval;
+        let nextPageToken = '';
 
-            // --- DOM Elements ---
-            const playlistContainer = document.getElementById('playlistContainer');
-            const audioPlayer = document.getElementById('audio-player-element');
-            const currentSongImage = document.getElementById('current-song-image');
-            const currentSongTitle = document.getElementById('current-song-title');
-            const currentSongArtist = document.getElementById('current-song-artist');
-            const playPauseBtn = document.getElementById('play-pause-btn');
-            const playIcon = document.getElementById('play-icon');
-            const pauseIcon = document.getElementById('pause-icon');
-            const nextBtn = document.getElementById('next-btn');
-            const prevBtn = document.getElementById('prev-btn');
-            const shuffleBtn = document.getElementById('shuffle-btn');
-            const currentTimeSpan = document.getElementById('current-time');
-            const durationSpan = document.getElementById('duration');
-            const progressBarContainer = document.getElementById('progress-bar-container');
-            const progressBar = document.getElementById('progress-bar');
-            const volumeSlider = document.getElementById('volumeSlider');
-            const volumeValueSpan = document.getElementById('volumeValue');
-            const initialPlayButton = document.getElementById('initial-play-button');
-            const controlsDiv = document.getElementById('controls');
-            const playerContainer = document.getElementById('player-container');
-            const visualizerElements = document.querySelectorAll('.visualizer-element');
-            const playlistSidebar = document.getElementById('playlist-sidebar');
+        const playerContainer = document.getElementById('player-container');
+        const controlsDiv = document.getElementById('controls');
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const prevBtn = document.getElementById('prev-btn');
+        const shuffleBtn = document.getElementById('shuffle-btn');
+        const videoPlayer = document.getElementById('video-player');
+        const playlistSidebar = document.getElementById('playlist-sidebar');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+        const currentSongImage = document.getElementById('current-song-image');
+        const currentSongTitle = document.getElementById('current-song-title');
+        const currentSongArtist = document.getElementById('current-song-artist');
+        const currentTime = document.getElementById('current-time');
+        const duration = document.getElementById('duration');
+        const progressBarContainer = document.getElementById('progress-bar-container');
+        const progressBar = document.getElementById('progress-bar');
+        const initialPlayButton = document.getElementById('initial-play-button');
+        const visualizerContainer = document.getElementById('visualizer-container');
+        const visualizerElements = document.querySelectorAll('.visualizer-element');
 
-            // --- State Variables ---
-            let currentPlaylist = [];
-            let currentSongIndex = 0; // Start with the first song
-            let isShuffle = false;
-            let progressInterval;
+        // No longer using onYouTubeIframeAPIReady, call loadPlaylistData directly
+        document.addEventListener('DOMContentLoaded', loadPlaylistData);
 
-            // --- Event Listeners ---
-            playPauseBtn.addEventListener('click', togglePlayPause);
-            nextBtn.addEventListener('click', playNextSong);
-            prevBtn.addEventListener('click', playPreviousSong);
-            shuffleBtn.addEventListener('click', toggleShuffle);
-            volumeSlider.addEventListener('input', updateVolume);
-            progressBarContainer.addEventListener('click', seekAudio);
-            audioPlayer.addEventListener('timeupdate', updateProgressBar);
-            audioPlayer.addEventListener('ended', playNextSong);
-            initialPlayButton.addEventListener('click', handleInitialPlay);
+        // This function is called by the YouTube Iframe Player API when it's ready
+        function onYouTubeIframeAPIReady() {
+            if (playlistItems.length > 0) {
+                createPlayer();
+                loadVideo(currentVideoIndex);
+            }
+        }
 
-            // --- Initialization ---
-            loadPlaylist();
-
-            // --- Functions ---
-            async function loadPlaylist() {
-                playlistContainer.innerHTML = 'Loading playlist...';
-                try {
-                    const response = await fetch(`/playlist-content?playlistId=${PLAYLIST_ID}`);
-                    const data = await response.json();
-
-                    if (data.length === 0) {
-                        playlistContainer.innerHTML = '<p>No songs found in this playlist.</p>';
-                        return;
-                    }
-
-                    currentPlaylist = data;
-                    renderPlaylist();
-                    // Load the first song's info for display, but don't autoplay yet
-                    updateSongInfo(currentPlaylist[currentSongIndex]);
-                    setBackground(currentPlaylist[currentSongIndex].thumbnail);
-
-                } catch (error) {
-                    console.error('Error loading playlist:', error);
-                    playlistContainer.innerHTML = '<p>Error loading playlist. Please check the Playlist ID.</p>';
+        async function loadPlaylistData(pageToken = '') {
+            try {
+                let endpoint = `${YOUTUBE_API_PLAYLIST_ITEMS_ENDPOINT}?part=snippet,contentDetails&playlistId=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}&maxResults=50`;
+                if (pageToken) {
+                    endpoint += `&pageToken=${pageToken}`;
                 }
-            }
 
-            function renderPlaylist() {
-                playlistContainer.innerHTML = '';
-                currentPlaylist.forEach((item, index) => {
-                    const playlistItem = document.createElement('div');
-                    playlistItem.classList.add('playlist-item');
-                    if (index === currentSongIndex) {
-                        playlistItem.classList.add('bg-blue-600');
-                    }
-                    playlistItem.innerHTML = `
-                        <img src="${item.thumbnail}" alt="${item.title}" class="playlist-thumb">
-                        <div class="playlist-info">
-                            <span class="playlist-title">${item.title}</span>
-                            <span class="playlist-channel">${item.author}</span>
-                        </div>
-                    `;
-                    playlistItem.addEventListener('click', () => playSong(index));
-                    playlistContainer.appendChild(playlistItem);
-                });
-            }
-
-            async function playSong(index) {
-                currentSongIndex = index;
-                const song = currentPlaylist[currentSongIndex];
-
-                updateSongInfo(song);
-                setBackground(song.thumbnail);
-                renderPlaylist(); // Re-render to highlight current song
-
-                try {
-                    const response = await fetch(`/play?videoId=${song.videoId}`);
-                    const data = await response.json();
-
-                    if (data.audioUrl) {
-                        audioPlayer.src = data.audioUrl;
-                        audioPlayer.play();
-                        updatePlayPauseIcon(true);
-                        startVisualizer();
-                    } else {
-                        console.error('No audio URL found:', data);
-                        updatePlayPauseIcon(false);
-                        stopVisualizer();
-                    }
-                } catch (error) {
-                    console.error('Error playing song:', error);
-                    updatePlayPauseIcon(false);
-                    stopVisualizer();
-                }
-            }
-
-            function updateSongInfo(song) {
-                currentSongTitle.textContent = song.title;
-                currentSongImage.src = song.thumbnail;
-                currentSongImage.style.display = 'block';
-                currentSongArtist.textContent = song.author;
-            }
-
-            function togglePlayPause() {
-                if (audioPlayer.paused) {
-                    audioPlayer.play();
-                    updatePlayPauseIcon(true);
-                    startVisualizer();
-                } else {
-                    audioPlayer.pause();
-                    updatePlayPauseIcon(false);
-                    stopVisualizer();
-                }
-            }
-
-            function updatePlayPauseIcon(isPlaying) {
-                if (isPlaying) {
-                    playIcon.classList.add('hidden');
-                    pauseIcon.classList.remove('hidden');
-                } else {
-                    playIcon.classList.remove('hidden');
-                    pauseIcon.classList.add('hidden');
-                }
-            }
-
-            function playNextSong() {
-                if (currentPlaylist.length === 0) return;
-
-                if (isShuffle) {
-                    currentSongIndex = Math.floor(Math.random() * currentPlaylist.length);
-                } else {
-                    currentSongIndex = (currentSongIndex + 1) % currentPlaylist.length;
-                }
-                playSong(currentSongIndex);
-            }
-
-            function playPreviousSong() {
-                if (currentPlaylist.length === 0) return;
-
-                if (isShuffle) {
-                    currentSongIndex = Math.floor(Math.random() * currentPlaylist.length);
-                } else {
-                    currentSongIndex = (currentSongIndex - 1 + currentPlaylist.length) % currentPlaylist.length;
-                }
-                playSong(currentSongIndex);
-            }
-
-            function toggleShuffle() {
-                isShuffle = !isShuffle;
-                if (isShuffle) {
-                    shuffleBtn.classList.add('bg-blue-600');
-                } else {
-                    shuffleBtn.classList.remove('bg-blue-600');
-                }
-            }
-
-            function updateVolume() {
-                const volume = volumeSlider.value / 10; // Scale 0-10 to 0-1
-                audioPlayer.volume = volume;
-                volumeValueSpan.textContent = volumeSlider.value;
-            }
-
-            function updateProgressBar() {
-                const currentTime = audioPlayer.currentTime;
-                const duration = audioPlayer.duration;
-
-                currentTimeSpan.textContent = formatTime(currentTime);
-                durationSpan.textContent = formatTime(duration);
-
-                const progress = (currentTime / duration) * 100;
-                progressBar.style.width = `${progress}%`;
-            }
-
-            function formatTime(time) {
-                const minutes = Math.floor(time / 60);
-                const seconds = Math.floor(time % 60).toString().padStart(2, '0');
-                return `${minutes}:${seconds}`;
-            }
-
-            function seekAudio(e) {
-                const rect = progressBarContainer.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const width = rect.width;
-                const duration = audioPlayer.duration;
+                const response = await fetch(endpoint);
+                const data = await response.json();
                 
-                const seekTime = (clickX / width) * duration;
-                audioPlayer.currentTime = seekTime;
-            }
+                if (data.error) {
+                    console.error('YouTube API Error:', data.error.message);
+                    return;
+                }
+                
+                nextPageToken = data.nextPageToken || '';
+                const videoIds = data.items.map(item => item.contentDetails.videoId);
 
-            function setBackground(imageUrl) {
-                playerContainer.style.backgroundImage = `url('${imageUrl}')`;
-                controlsDiv.style.backgroundImage = `url('${imageUrl}')`;
-            }
+                // Fetch video details for duration and high-quality thumbnails
+                if (videoIds.length > 0) {
+                    const videoDetailsEndpoint = `${YOUTUBE_API_VIDEOS_ENDPOINT}?part=snippet,contentDetails&id=${videoIds.join(',')}&key=${YOUTUBE_API_KEY}`;
+                    const videoDetailsResponse = await fetch(videoDetailsEndpoint);
+                    const videoDetailsData = await videoDetailsResponse.json();
 
-            function handleInitialPlay() {
-                if (currentPlaylist.length > 0) {
-                    playSong(currentSongIndex); // Start playing the current song
+                    const videoDetailsMap = new Map();
+                    videoDetailsData.items.forEach(item => {
+                        videoDetailsMap.set(item.id, item);
+                    });
+
+                    const formattedNewItems = data.items.map(item => {
+                        const videoDetail = videoDetailsMap.get(item.contentDetails.videoId);
+                        const durationIso = videoDetail?.contentDetails?.duration; // e.g., PT1M30S
+                        let durationSeconds = 0;
+                        if (durationIso) {
+                            const matches = durationIso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                            if (matches) {
+                                const hours = parseInt(matches[1] || 0, 10);
+                                const minutes = parseInt(matches[2] || 0, 10);
+                                const seconds = parseInt(matches[3] || 0, 10);
+                                durationSeconds = hours * 3600 + minutes * 60 + seconds;
+                            }
+                        }
+
+                        return {
+                            snippet: {
+                                resourceId: {
+                                    videoId: item.contentDetails.videoId
+                                },
+                                thumbnails: {
+                                    default: { url: item.snippet.thumbnails.default?.url || '' },
+                                    high: { url: item.snippet.thumbnails.high?.url || '' }
+                                },
+                                title: item.snippet.title,
+                                videoOwnerChannelTitle: item.snippet.videoOwnerChannelTitle || item.snippet.channelTitle,
+                                duration: durationSeconds // Duration in seconds
+                            }
+                        };
+                    });
+
+                    playlistItems = playlistItems.concat(formattedNewItems);
+                    originalPlaylist = [...playlistItems];
                 }
 
+                if (playlistItems.length > 0 && !player) {
+                    setBackground(playlistItems[currentVideoIndex].snippet.thumbnails.high.url);
+                    // onYouTubeIframeAPIReady will create the player
+                } else if (playlistItems.length > 0) {
+                    renderPlaylist();
+                }
+
+            } catch (error) {
+                console.error('Network or API error:', error);
+            }
+        }
+
+        playlistSidebar.addEventListener('scroll', () => {
+            if (playlistSidebar.scrollTop + playlistSidebar.clientHeight >= playlistSidebar.scrollHeight - 100) {
+                if (nextPageToken) {
+                    loadPlaylistData(nextPageToken);
+                }
+            }
+        });
+
+        initialPlayButton.addEventListener('click', () => {
+            if (isPlayerReady) {
+                // Autoplay policy: Browsers may block autoplay with sound until user interaction.
+                // The video is set to autoplay in createPlayer(), but if it's blocked, this click will start it.
                 initialPlayButton.classList.add('fade-out');
                 controlsDiv.classList.remove('hidden');
                 controlsDiv.classList.add('fade-in');
@@ -601,30 +511,222 @@
                     initialPlayButton.style.display = 'none';
                 });
             }
+        });
 
-            function getRandomVibrantColor() {
-                const hue = Math.floor(Math.random() * 360);
-                const saturation = 90 + Math.random() * 10; // 90-100% saturation
-                const lightness = 50 + Math.random() * 10; // 50-60% lightness
-                return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        function setBackground(imageUrl) {
+            playerContainer.style.backgroundImage = `url('${imageUrl}')`;
+            controlsDiv.style.backgroundImage = `url('${imageUrl}')`;
+        }
+
+        function createPlayer() {
+            player = new YT.Player('video-player', {
+                videoId: playlistItems[currentVideoIndex].snippet.resourceId.videoId,
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                },
+                playerVars: {
+                    'autoplay': 1, // Set to 1 to attempt autoplay
+                    'modestbranding': 1,
+                    'controls': 0
+                }
+            });
+        }
+        
+        
+        
+        function onPlayerReady(event) {
+            isPlayerReady = true;
+            videoPlayer.style.display = 'block';
+            updatePlayPauseIcon(1); // Assume playing initially
+            // Start progress bar update
+            progressInterval = setInterval(updateProgressBar, 1000);
+            // Visualizer elements will be handled by onPlayerStateChange
+        }
+
+        function onPlayerStateChange(event) {
+            switch (event.data) {
+                case YT.PlayerState.ENDED:
+                    nextVideo();
+                    break;
+                case YT.PlayerState.PLAYING:
+                    updatePlayPauseIcon(1); // Show pause icon
+                    // Start visualizer animation
+                    visualizerElements.forEach((el, index) => {
+                        el.classList.add('jumping');
+                        el.style.animationDelay = `${index * 0.05}s`;
+                        el.style.backgroundColor = getRandomVibrantColor();
+                        el.style.boxShadow = `0 0 5px ${el.style.backgroundColor}, 0 0 10px ${el.style.backgroundColor}`;
+                    });
+                    break;
+                case YT.PlayerState.PAUSED:
+                    updatePlayPauseIcon(0); // Show play icon
+                    // Stop visualizer animation
+                    visualizerElements.forEach(el => {
+                        el.classList.remove('jumping');
+                    });
+                    break;
+                case YT.PlayerState.BUFFERING:
+                    // Optionally handle buffering state
+                    break;
+                case YT.PlayerState.CUED:
+                    // Optionally handle cued state
+                    break;
+            }
+        }
+
+        function formatTime(time) {
+            const minutes = Math.floor(time / 60);
+            const seconds = Math.floor(time % 60).toString().padStart(2, '0');
+            return `${minutes}:${seconds}`;
+        }
+
+        function updateProgressBar() {
+            if (!isPlayerReady || !player.getDuration) return;
+
+            const currentTimeValue = player.getCurrentTime();
+            const durationValue = player.getDuration();
+
+            currentTime.textContent = formatTime(currentTimeValue);
+            duration.textContent = formatTime(durationValue);
+
+            const progress = (currentTimeValue / durationValue) * 100;
+            progressBar.style.width = `${progress}%`;
+        }
+
+        progressBarContainer.addEventListener('click', (e) => {
+            if (!isPlayerReady || !player.getDuration) return;
+
+            const rect = progressBarContainer.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const width = rect.width;
+            const durationValue = player.getDuration();
+            
+            const seekTime = (clickX / width) * durationValue;
+            player.seekTo(seekTime, true);
+        });
+
+        function updatePlayPauseIcon(isPlaying) {
+            if (isPlaying) {
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+            } else {
+                playIcon.classList.remove('hidden');
+                pauseIcon.classList.add('hidden');
+            }
+        }
+
+        function togglePlayPause() {
+            if (!isPlayerReady) return;
+            if (player.getPlayerState() === YT.PlayerState.PLAYING || player.getPlayerState() === YT.PlayerState.BUFFERING) {
+                player.pauseVideo();
+            } else {
+                player.playVideo();
+            }
+        }
+
+        function nextVideo() {
+            if (isShuffle) {
+                currentVideoIndex = Math.floor(Math.random() * playlistItems.length);
+            } else {
+                currentVideoIndex = (currentVideoIndex + 1) % playlistItems.length;
+            }
+            loadVideo(currentVideoIndex);
+        }
+        
+        function prevVideo() {
+            currentVideoIndex = (currentVideoIndex - 1 + playlistItems.length) % playlistItems.length;
+            loadVideo(currentVideoIndex);
+        }
+
+        function shufflePlaylist() {
+            isShuffle = !isShuffle;
+            updateShuffleButton();
+
+            if (isShuffle) {
+                for (let i = playlistItems.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [playlistItems[i], playlistItems[j]] = [playlistItems[j], playlistItems[i]];
+                }
+            } else {
+                playlistItems = [...originalPlaylist];
             }
 
-            function startVisualizer() {
-                visualizerElements.forEach((el, index) => {
-                    el.classList.add('jumping');
-                    el.style.animationDelay = `${index * 0.05}s`;
-                    el.style.backgroundColor = getRandomVibrantColor();
-                    el.style.boxShadow = `0 0 5px ${el.style.backgroundColor}, 0 0 10px ${el.style.backgroundColor}`;
-                });
-            }
+            currentVideoIndex = 0;
+            renderPlaylist();
+            loadVideo(currentVideoIndex);
+        }
 
-            function stopVisualizer() {
-                visualizerElements.forEach(el => {
-                    el.classList.remove('jumping');
-                    el.style.animationDelay = '';
-                    el.style.backgroundColor = '';
-                    el.style.boxShadow = '';
+        function updateShuffleButton() {
+            if (isShuffle) {
+                shuffleBtn.classList.add('bg-blue-600');
+            } else {
+                shuffleBtn.classList.remove('bg-blue-600');
+            }
+        }
+
+        function getRandomVibrantColor() {
+            const hue = Math.floor(Math.random() * 360);
+            const saturation = 90 + Math.random() * 10; // 90-100% saturation
+            const lightness = 50 + Math.random() * 10; // 50-60% lightness
+            return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        }
+
+        function loadVideo(index) {
+            const video = playlistItems[index].snippet;
+            setBackground(video.thumbnails.high.url);
+            
+            const videoId = video.resourceId.videoId;
+            
+            if (player) {
+                player.loadVideoById(videoId);
+            } else {
+                // If player is not yet initialized, onYouTubeIframeAPIReady will handle it
+                // This case should ideally not be hit if onYouTubeIframeAPIReady is working correctly
+            }
+            
+            renderPlaylist();
+
+            currentSongImage.src = video.thumbnails.default.url;
+            currentSongTitle.textContent = video.title;
+            currentSongArtist.textContent = video.videoOwnerChannelTitle || 'Desconhecido';
+        }
+
+        function renderPlaylist() {
+            playlistSidebar.innerHTML = "";
+            playlistItems.forEach((item, index) => {
+                const isActive = index === currentVideoIndex;
+                const div = document.createElement('div');
+                div.className = `playlist-item ${isActive ? 'bg-blue-600' : ''}`;
+                div.innerHTML = `
+                    <img src="${item.snippet.thumbnails.default.url}" class="playlist-thumb">
+                    <div class="playlist-info">
+                        <span class="playlist-title">${item.snippet.title}</span>
+                        <span class="playlist-channel">${item.snippet.videoOwnerChannelTitle || 'Desconhecido'}</span>
+                    </div>
+                `;
+                div.addEventListener('click', () => {
+                    currentVideoIndex = index;
+                    loadVideo(index);
                 });
+                playlistSidebar.appendChild(div);
+            });
+        }
+
+        playPauseBtn.addEventListener('click', togglePlayPause);
+        nextBtn.addEventListener('click', nextVideo);
+        prevBtn.addEventListener('click', prevVideo);
+        shuffleBtn.addEventListener('click', shufflePlaylist);
+
+        // Volume control
+        const volumeSlider = document.getElementById('volumeSlider');
+        const volumeValueSpan = document.getElementById('volumeValue');
+
+        volumeSlider.addEventListener('input', () => {
+            if (player) {
+                const volume = volumeSlider.value * 10; // Scale 0-10 to 0-100
+                player.setVolume(volume); 
+                volumeValueSpan.textContent = volumeSlider.value;
             }
         });
     </script>
